@@ -35,6 +35,10 @@ public class MongoConfig {
     @Value("${app.mongodb.failOnStartup:false}")
     private boolean failOnStartup;
 
+    // If true, perform a lightweight ping during startup to verify connectivity. Default false to avoid blocking startup.
+    @Value("${app.mongodb.pingOnStartup:false}")
+    private boolean pingOnStartup;
+
     @Bean
     public MongoClient mongoClient() {
         String connectionString = determineConnectionString();
@@ -48,25 +52,26 @@ public class MongoConfig {
 
         MongoClient client = MongoClients.create(settings);
 
-        // Short startup ping to detect immediate connectivity problems. By default, do not fail the app when ping fails —
-        // this allows the application to start and handle transient Mongo outages gracefully. Set app.mongodb.failOnStartup=true
-        // to restore the previous strict behavior.
-        try {
-            log.info("Pinging MongoDB to verify connectivity (timeout {} ms)...", serverSelectionTimeoutMs);
-            Document ping = new Document("ping", 1);
-            client.getDatabase("admin")
-                    .runCommand(ping);
-            log.info("Successfully connected to MongoDB (ping OK)");
-        } catch (Exception e) {
-            log.warn("Unable to ping MongoDB during startup: {}", e.toString());
-            if (failOnStartup) {
-                log.error("app.mongodb.failOnStartup is true — failing application startup due to Mongo connectivity");
-                // Close client and rethrow to fail bean creation
-                try { client.close(); } catch (Exception ignore) {}
-                throw new RuntimeException("Failed to connect to MongoDB during startup", e);
-            } else {
-                log.warn("Continuing startup in degraded mode; Mongo operations will retry when first used.");
+        // Optional startup ping: only run if explicitly enabled to avoid blocking startup in environments
+        // where DNS or network can be slow (Cloud Run, etc.). Configure via app.mongodb.pingOnStartup=true
+        if (pingOnStartup) {
+            try {
+                log.info("Pinging MongoDB to verify connectivity (timeout {} ms)...", serverSelectionTimeoutMs);
+                Document ping = new Document("ping", 1);
+                client.getDatabase("admin").runCommand(ping);
+                log.info("Successfully connected to MongoDB (ping OK)");
+            } catch (Exception e) {
+                log.warn("Unable to ping MongoDB during startup: {}", e.toString());
+                if (failOnStartup) {
+                    log.error("app.mongodb.failOnStartup is true — failing application startup due to Mongo connectivity");
+                    try { client.close(); } catch (Exception ignore) {}
+                    throw new RuntimeException("Failed to connect to MongoDB during startup", e);
+                } else {
+                    log.warn("Continuing startup in degraded mode; Mongo operations will retry when first used.");
+                }
             }
+        } else {
+            log.debug("app.mongodb.pingOnStartup is false — skipping startup ping to avoid blocking startup.");
         }
 
         return client;
