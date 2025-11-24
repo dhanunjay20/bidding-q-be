@@ -31,6 +31,13 @@ public class BiddingApplication {
             System.err.println("Warning: failed to set dev profile: " + e.getMessage());
         }
 
+        // Print resolved port and relevant properties for easier debugging in container logs
+        String portEnv = System.getenv("PORT");
+        String portProp = System.getProperty("PORT");
+        System.out.println("Resolved PORT -> env:" + portEnv + " prop:" + portProp);
+        String serverAddr = System.getProperty("server.address");
+        System.out.println("Resolved server.address System property: " + serverAddr);
+
         SpringApplication.run(BiddingApplication.class, args);
     }
 
