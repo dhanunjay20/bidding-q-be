@@ -4,6 +4,8 @@ import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import java.util.concurrent.TimeUnit;
+import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +23,18 @@ public class MongoConfig {
     @Value("${spring.data.mongodb.uri:mongodb://localhost:27017/eventbidding}")
     private String mongoUriDefault;
 
+    // How long (ms) the driver should wait to select a server before giving up on startup checks
+    @Value("${SPRING_DATA_MONGODB_SERVER_SELECTION_TIMEOUT_MS:5000}")
+    private int serverSelectionTimeoutMs;
+
+    // Connect timeout for socket (ms)
+    @Value("${SPRING_DATA_MONGODB_SOCKET_CONNECT_TIMEOUT_MS:2000}")
+    private int socketConnectTimeoutMs;
+
+    // If true, a failed ping on startup will cause the application context to fail. Set false to allow app to start in degraded mode.
+    @Value("${app.mongodb.failOnStartup:false}")
+    private boolean failOnStartup;
+
     @Bean
     public MongoClient mongoClient() {
         String connectionString = determineConnectionString();
@@ -28,8 +42,34 @@ public class MongoConfig {
         ConnectionString cs = new ConnectionString(connectionString);
         MongoClientSettings settings = MongoClientSettings.builder()
                 .applyConnectionString(cs)
+                .applyToClusterSettings(b -> b.serverSelectionTimeout(serverSelectionTimeoutMs, TimeUnit.MILLISECONDS))
+                .applyToSocketSettings(b -> b.connectTimeout(socketConnectTimeoutMs, TimeUnit.MILLISECONDS))
                 .build();
-        return MongoClients.create(settings);
+
+        MongoClient client = MongoClients.create(settings);
+
+        // Short startup ping to detect immediate connectivity problems. By default, do not fail the app when ping fails —
+        // this allows the application to start and handle transient Mongo outages gracefully. Set app.mongodb.failOnStartup=true
+        // to restore the previous strict behavior.
+        try {
+            log.info("Pinging MongoDB to verify connectivity (timeout {} ms)...", serverSelectionTimeoutMs);
+            Document ping = new Document("ping", 1);
+            client.getDatabase("admin")
+                    .runCommand(ping);
+            log.info("Successfully connected to MongoDB (ping OK)");
+        } catch (Exception e) {
+            log.warn("Unable to ping MongoDB during startup: {}", e.toString());
+            if (failOnStartup) {
+                log.error("app.mongodb.failOnStartup is true — failing application startup due to Mongo connectivity");
+                // Close client and rethrow to fail bean creation
+                try { client.close(); } catch (Exception ignore) {}
+                throw new RuntimeException("Failed to connect to MongoDB during startup", e);
+            } else {
+                log.warn("Continuing startup in degraded mode; Mongo operations will retry when first used.");
+            }
+        }
+
+        return client;
     }
 
     private String determineConnectionString() {
@@ -76,4 +116,3 @@ public class MongoConfig {
         }
     }
 }
-
