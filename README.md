@@ -1,1 +1,1 @@
-# bidding-q-be
+# eventbidding
