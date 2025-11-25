@@ -66,61 +66,61 @@ public class MailConfig {
         props.put("mail.smtp.auth", smtpAuth != null ? smtpAuth : "true");
         props.put("mail.debug", mailDebug != null ? mailDebug : "false");
 
-        // Prevent the mail sender from hanging indefinitely if the SMTP server is down or unreachable
-        // timeouts are in milliseconds
-        props.put("mail.smtp.connectiontimeout", "10000");
-        props.put("mail.smtp.timeout", "10000");
-        props.put("mail.smtp.writetimeout", "10000");
+        // Increase timeouts to allow for network latency but still fail reasonably
+        props.put("mail.smtp.connectiontimeout", "30000");
+        props.put("mail.smtp.timeout", "30000");
+        props.put("mail.smtp.writetimeout", "30000");
 
-        // Auto-detect SSL/STARTTLS behaviour when sslEnable isn't explicitly set
+        // Decide SSL/STARTTLS behaviour
         boolean sslExplicit = sslEnable != null && !sslEnable.isEmpty();
+        boolean usingSsl = false;
         if (!sslExplicit) {
             if (port == 465) {
                 props.put("mail.smtp.ssl.enable", "true");
                 props.put("mail.smtp.starttls.enable", "false");
+                usingSsl = true;
             } else if (port == 587) {
                 props.put("mail.smtp.starttls.enable", "true");
                 props.put("mail.smtp.ssl.enable", "false");
             } else {
-                // fallback to configured starttls value (or default true)
                 props.put("mail.smtp.starttls.enable", starttlsEnable != null ? starttlsEnable : "true");
             }
         } else {
-            // If an explicit value is provided but the port strongly indicates SSL (465), prefer SSL
-            // because many providers require SSL on 465 even if an env var was mis-set.
-            if (port == 465 && !Boolean.parseBoolean(sslEnable)) {
+            // user provided explicit setting
+            props.put("mail.smtp.ssl.enable", sslEnable);
+            props.put("mail.smtp.starttls.enable", starttlsEnable != null ? starttlsEnable : "true");
+            usingSsl = Boolean.parseBoolean(sslEnable);
+            // If port 465 -> implicit SSL is expected; ensure we use SSL
+            if (port == 465 && !usingSsl) {
                 log.warn("Port 465 detected but mail.smtp.ssl.enable explicitly set to false — overriding to true for port 465");
                 props.put("mail.smtp.ssl.enable", "true");
                 props.put("mail.smtp.starttls.enable", "false");
-            } else {
-                props.put("mail.smtp.ssl.enable", sslEnable);
-                props.put("mail.smtp.starttls.enable", starttlsEnable != null ? starttlsEnable : "true");
+                usingSsl = true;
             }
         }
 
-        // Trust the host for SSL to avoid certificate issues in many SMTP providers
-        if (host != null && !host.isBlank()) {
-            props.put("mail.smtp.ssl.trust", host);
-        }
-
-        // If SSL is enabled (or we're using port 465), prefer modern TLS protocols
-        String sslEnabled = props.getProperty("mail.smtp.ssl.enable");
-        boolean usingSsl = sslEnabled != null && Boolean.parseBoolean(sslEnabled);
+        // For implicit SSL (port 465) prefer the smtps protocol, and add socket factory hints for compatibility
         if (usingSsl || port == 465) {
-            // prefer TLSv1.2/1.3 for improved interoperability
+            impl.setProtocol("smtps");
             props.put("mail.smtp.ssl.protocols", "TLSv1.3 TLSv1.2");
-            // ensure we do not attempt STARTTLS when using implicit SSL
             props.put("mail.smtp.starttls.required", "false");
-            // don't fallback to non-SSL socket factory if SSL handshake fails
             props.put("mail.smtp.ssl.socketFactory.fallback", "false");
+            // Socket factory class (legacy but increases compatibility with some providers)
+            props.put("mail.smtp.socketFactory.class", "javax.net.ssl.SSLSocketFactory");
+            if (port > 0) props.put("mail.smtp.socketFactory.port", String.valueOf(port));
+            // Be explicit about trust to avoid certificate issues during handshake
+            props.put("mail.smtp.ssl.trust", host);
+            props.put("mail.smtp.ssl.checkserveridentity", "true");
+        } else {
+            // For non-SSL connections ensure STARTTLS behaviour is as configured
+            props.put("mail.smtp.starttls.enable", props.getProperty("mail.smtp.starttls.enable", "true"));
         }
 
-        // Remove legacy socketFactory settings to avoid conflicts with Jakarta Mail implementations
-        // (they can cause ClassNotFound on some environments)
-
-        log.info("Mail properties configured: auth={}, starttls={}, ssl={}, debug= {}",
-                 smtpAuth, props.getProperty("mail.smtp.starttls.enable"), props.getProperty("mail.smtp.ssl.enable"), mailDebug);
-        log.info("JavaMailSender configured successfully");
+        // Always log the resolved mail properties (masked sensitive values)
+        String sslVal = props.getProperty("mail.smtp.ssl.enable");
+        String starttlsVal = props.getProperty("mail.smtp.starttls.enable");
+        log.info("Mail properties configured: auth={}, starttls={}, ssl={}, debug={}", smtpAuth, starttlsVal, sslVal, mailDebug);
+        log.info("JavaMailSender configured successfully (protocol={})", impl.getProtocol());
         return impl;
     }
 
