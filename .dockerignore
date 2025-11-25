@@ -1,0 +1,25 @@
+# Exclude everything by default then allow the specific jar if needed
+**/*
+!.dockerignore
+!target/bidding-0.0.1-SNAPSHOT.jar
+
+# IDE and local files
+.idea
+*.iml
+*.log
+.vscode
+
+# Maven local build artifacts (unless the final jar is present and allowed above)
+target/
+
+# Git
+.git
+.gitignore
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+

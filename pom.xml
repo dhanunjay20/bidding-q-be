@@ -8,10 +8,10 @@
         <version>3.5.6</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
-    <groupId>com.pulse</groupId>
-    <artifactId>fineflux</artifactId>
+    <groupId>com.event</groupId>
+    <artifactId>bidding</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>fineflux</name>
+    <name>bidding</name>
     <description>Demo project for Spring Boot</description>
     <url/>
     <licenses>
